@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/chat_screen.dart';
+import 'screens/home_screen.dart'; // Updated import
 
 void main() {
   runApp(const MyApp());
@@ -20,16 +20,17 @@ class MyApp extends StatelessWidget {
           title: 'WhatsApp Chat Parser',
           debugShowCheckedModeBanner: false,
           themeMode: currentMode,
+          // ... (themes remain same, assuming they are inside)
           theme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.light,
             scaffoldBackgroundColor: const Color(0xFFECE5DD),
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFF075E54),
-              primary: const Color(0xFF075E54), // AppBar
+              primary: const Color(0xFF075E54),
               secondary: const Color(0xFF128C7E),
-              surface: Colors.white, // Incoming bubble
-              onSurface: Colors.black87, // Fix for dialog text readability
+              surface: Colors.white,
+              onSurface: Colors.black87,
             ),
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFF075E54),
@@ -39,21 +40,22 @@ class MyApp extends StatelessWidget {
           darkTheme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.dark,
-            scaffoldBackgroundColor: const Color(0xFF0B141A), // WA Dark Bg
+            scaffoldBackgroundColor: const Color(0xFF0B141A),
             colorScheme: ColorScheme.fromSeed(
               brightness: Brightness.dark,
               seedColor: const Color(0xFF00A884),
-              primary: const Color(0xFF1F2C34), // AppBar Dark
-              secondary: const Color(0xFF005C4B), // Outgoing Dark
-              surface: const Color(0xFF1F2C34), // Incoming Dark
-              onSurface: const Color(0xFF005C4B), // Outgoing Dark ref
+              primary: const Color(0xFF00A884), // Buttons/Accents (Green)
+              onPrimary: Colors.black,
+              secondary: const Color(0xFF005C4B),
+              surface: const Color(0xFF1F2C34), // Dialog Background
+              onSurface: const Color(0xFFE9EDEF), // Text Color (White-ish)
             ),
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFF1F2C34),
               foregroundColor: Color(0xFF8696A0),
             ),
           ),
-          home: const ChatScreen(),
+          home: const HomeScreen(),
         );
       },
     );
