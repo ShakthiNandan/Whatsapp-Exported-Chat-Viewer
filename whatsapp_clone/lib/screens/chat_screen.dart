@@ -1,3 +1,4 @@
+import 'dart:async'; // For Timer
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'; // For compute
@@ -12,7 +13,8 @@ import '../widgets/chat_bubble.dart';
 import '../main.dart'; // Import to access themeNotifier
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String? filePath;
+  const ChatScreen({super.key, this.filePath});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -34,13 +36,30 @@ class _ChatScreenState extends State<ChatScreen> {
   // Search State
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
-  List<int> _searchResults = []; // Indices of matching messages
-  int _currentMatchIndex = -1; // Index in _searchResults
+  List<int> _searchResults = [];
+  int _currentMatchIndex = -1;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
-    _loadDefaultChat();
+    _loadInitialChat();
+  }
+
+  Future<void> _loadInitialChat() async {
+    if (widget.filePath != null) {
+      File file = File(widget.filePath!);
+      if (await file.exists()) {
+        String content = await file.readAsString();
+        if (!mounted) return;
+        _parseAndLoad(content);
+        return;
+      }
+    }
+    // Fallback to default
+    if (widget.filePath == null) {
+      _loadDefaultChat();
+    }
   }
 
   Future<void> _loadDefaultChat() async {
@@ -95,17 +114,7 @@ class _ChatScreenState extends State<ChatScreen> {
             _messages = messages;
             _isLoading = false;
           });
-
-          // Scroll to bottom after frame
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_messages.isNotEmpty) {
-              // Jump to end - safely
-              // For ScrollablePositionedList, usually jumpTo(index: length-1)
-              // We delay slightly to ensure layout?
-              // Or just do nothing on initial load to avoid jumpiness? User expects to see latest.
-              // _itemScrollController.jumpTo(index: _messages.length - 1);
-            }
-          });
+          // Scroll to bottom optional
         })
         .catchError((e) {
           if (!mounted) return;
@@ -116,35 +125,38 @@ class _ChatScreenState extends State<ChatScreen> {
         });
   }
 
-  // --- Search Logic ---
-
   void _runSearch(String query) {
-    if (query.isEmpty) {
-      setState(() {
-        _searchResults = [];
-        _currentMatchIndex = -1;
-      });
-      return;
-    }
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    final lowerQuery = query.toLowerCase();
-    List<int> results = [];
-    for (int i = 0; i < _messages.length; i++) {
-      if (_messages[i].message.toLowerCase().contains(lowerQuery)) {
-        results.add(i);
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      if (query.isEmpty) {
+        setState(() {
+          _searchResults = [];
+          _currentMatchIndex = -1;
+        });
+        return;
       }
-    }
 
-    setState(() {
-      _searchResults = results;
-      _currentMatchIndex = results.isNotEmpty
-          ? results.length - 1
-          : -1; // Start at most recent
+      // Optimize: Simple string search is fast, but we can do it asynchronously if huge
+      final lowerQuery = query.toLowerCase();
+      List<int> results = [];
+      for (int i = 0; i < _messages.length; i++) {
+        // Optimization: Use contains instead of RegExp for simple text
+        if (_messages[i].message.toLowerCase().contains(lowerQuery)) {
+          results.add(i);
+        }
+      }
+
+      setState(() {
+        _searchResults = results;
+        _currentMatchIndex = results.isNotEmpty ? results.length - 1 : -1;
+      });
+
+      if (_currentMatchIndex != -1) {
+        _scrollToMessage(_searchResults[_currentMatchIndex]);
+      }
     });
-
-    if (_currentMatchIndex != -1) {
-      _scrollToMessage(_searchResults[_currentMatchIndex]);
-    }
   }
 
   void _nextMatch() {
@@ -274,6 +286,64 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
+  }
+
+  bool _isSameDay(DateTime d1, DateTime d2) {
+    return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+  }
+
+  Widget _buildDateHeader(DateTime date) {
+    // Format: "25/01/2026" or "Monday"
+    // Logic: Today, Yesterday, or Date
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final dateOnly = DateTime(date.year, date.month, date.day);
+
+    String text;
+    if (dateOnly == today) {
+      text = "Today";
+    } else if (dateOnly == yesterday) {
+      text = "Yesterday";
+    } else {
+      // Use intl for formatting if available, or manual
+      // d/M/yyyy
+      text =
+          "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
+    }
+
+    // Determine color based on theme
+    final isDark = themeNotifier.value == ThemeMode.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF1F2C34)
+                : const Color(0xFFE1F5FE), // Dark Bubble / Light Blue-ish
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 2,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: isDark ? const Color(0xFF8696A0) : const Color(0xFF54656F),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // --- Theme Toggle ---
@@ -433,19 +503,36 @@ class _ChatScreenState extends State<ChatScreen> {
                 itemBuilder: (context, index) {
                   final msg = _messages[index];
 
+                  bool showDate = false;
+                  if (index == 0) {
+                    showDate = true;
+                  } else {
+                    final prevMsg = _messages[index - 1];
+                    if (!_isSameDay(msg.timestamp, prevMsg.timestamp)) {
+                      showDate = true;
+                    }
+                  }
+
                   bool isFocused =
                       _searchResults.isNotEmpty &&
                       _currentMatchIndex != -1 &&
                       _searchResults[_currentMatchIndex] == index;
 
-                  return Container(
-                    color: isFocused ? Colors.yellow.withOpacity(0.3) : null,
-                    child: ChatBubble(
-                      message: msg,
-                      highlightText: _isSearching
-                          ? _searchController.text
-                          : null,
-                    ),
+                  return Column(
+                    children: [
+                      if (showDate) _buildDateHeader(msg.timestamp),
+                      Container(
+                        color: isFocused
+                            ? Colors.yellow.withValues(alpha: 0.3)
+                            : null,
+                        child: ChatBubble(
+                          message: msg,
+                          highlightText: _isSearching
+                              ? _searchController.text
+                              : null,
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
