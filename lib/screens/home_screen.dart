@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -51,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error picking file: $e")));
@@ -64,6 +66,64 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _chatFiles = updatedList;
     });
+  }
+
+  /// Tries to extract a display name from the file content.
+  /// It reads a small chunk of the file to find the first sender name.
+  Future<String> _getChatName(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      return p
+          .basenameWithoutExtension(path)
+          .replaceAll("WhatsApp Chat with ", "");
+    }
+
+    try {
+      // Read first 10KB to find a name
+      // We assume standard encoding (UTF-8 usually)
+      final stream = file.openRead(0, 1024 * 10).transform(utf8.decoder);
+
+      // We only need the first chunk usually
+      final content = await stream.first;
+
+      // Regex to find names: starts with date/time, then " - Name: "
+      // 25/01/2026, 9:22 am - Shakthi: Message
+      // Pattern: \d{1,2}/\d{1,2}/\d{2,4},?\s\d{1,2}:\d{2}\s?[aApP]?[mM]?\s?-\s([^:]+):
+      final regex = RegExp(
+        r'\d{1,2}\/\d{1,2}\/\d{2,4},?\s?\d{1,2}:\d{2}\s?[aApP]?[mM]?\s?-\s([^:]+):',
+      );
+      final matches = regex.allMatches(content);
+
+      final Set<String> names = {};
+
+      // Collect first few unique names
+      for (final match in matches) {
+        if (match.groupCount >= 1) {
+          String name = match.group(1)!.trim();
+          // Filter out "You" and generic system messages slightly randomly if precise check fails
+          if (name.toLowerCase() != 'you' &&
+              !name.contains('Messages and calls are end-to-end encrypted') &&
+              !name.contains('created group') &&
+              !name.contains('added you')) {
+            names.add(name);
+          }
+        }
+        if (names.length >= 2) break; // Don't need too many
+      }
+
+      if (names.isNotEmpty) {
+        // Return first found name.
+        // In a 1-on-1 chat, "You" and "Person" are the participants.
+        // If we filtered "You", we likely have "Person".
+        return names.first;
+      }
+    } catch (e) {
+      // Fallback
+    }
+
+    return p
+        .basenameWithoutExtension(path)
+        .replaceAll("WhatsApp Chat with ", "");
   }
 
   // --- Theme Toggle ---
@@ -124,9 +184,6 @@ class _HomeScreenState extends State<HomeScreen> {
               itemCount: _chatFiles.length,
               itemBuilder: (context, index) {
                 final path = _chatFiles[index];
-                final name = p
-                    .basenameWithoutExtension(path)
-                    .replaceAll("WhatsApp Chat with ", "");
 
                 return Dismissible(
                   key: Key(path),
@@ -138,27 +195,43 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   direction: DismissDirection.endToStart,
                   onDismissed: (_) => _removeChat(path),
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFF075E54),
-                      child: Icon(Icons.person, color: Colors.white),
-                    ),
-                    title: Text(
-                      name,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      path,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatScreen(filePath: path),
+                  child: FutureBuilder<String>(
+                    future: _getChatName(path),
+                    builder: (context, snapshot) {
+                      final displayName =
+                          snapshot.data ??
+                          p
+                              .basenameWithoutExtension(path)
+                              .replaceAll("WhatsApp Chat with ", "");
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: const Color(0xFF075E54),
+                          child: Text(
+                            displayName.isNotEmpty
+                                ? displayName[0].toUpperCase()
+                                : "?",
+                            style: const TextStyle(color: Colors.white),
+                          ),
                         ),
+                        title: Text(
+                          displayName,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          path,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ChatScreen(filePath: path),
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
